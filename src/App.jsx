@@ -48,7 +48,12 @@ function App() {
         ceilingRank={ceilingRankObj}
         onDismiss={dismissReveal}
       />
-      <TopHud state={state} associationPower={stats.associationPower} />
+      <TopHud
+        state={state}
+        associationPower={stats.associationPower}
+        playerMaxHp={stats.playerMaxHp}
+        playerDefense={stats.playerDefense}
+      />
 
       {activeTab === "battle" && <BattleScreen state={state} update={update} />}
       {activeTab === "gates" && (

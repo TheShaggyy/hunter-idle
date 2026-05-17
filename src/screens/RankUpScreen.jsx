@@ -1,16 +1,25 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { RANKS, getRankIndex, getEligibleRank } from "../data/ranks.js";
 import { getTotalDamage } from "../systems/combat.js";
 import { getAllBuffs } from "../systems/equipment.js";
 import { useCombatLoop } from "../hooks/useCombatLoop.js";
 import { getRankCeiling } from "../data/awakening.js";
+import {
+  getPlayerMaxHp,
+  getRankUpGatekeeperAttack,
+} from "../systems/health.js";
 
 // Rank-Up Dungeon — a focused 90-second mini-fight.
-// Boss has 5x the HP of the current stage's Castle Lord, scaled to next-rank power.
-// Win: ascend to the next rank (clamped by awakening ceiling).
-// Lose/timeout: no penalty, just retry when ready.
+// Boss HP scales to next rank's powerRequired; Gatekeeper now hits back, so
+// you can die. Player HP refills to max on every attempt. Death and timeout
+// are both failure states; only kill = ascension.
+//
+// Stage used for the mitigation curve is the player's CURRENT stage —
+// underleveled players get little defensive benefit; deep-stage geared
+// players get the value they paid for.
 
 const TIME_LIMIT_SEC = 90;
+const STAMINA_COST = 30;
 
 export default function RankUpScreen({ state, update, onClose }) {
   const buffs = getAllBuffs(state);
@@ -25,31 +34,42 @@ export default function RankUpScreen({ state, update, onClose }) {
   const ceiling = getRankCeiling(state.awakeningLevel || 0);
   const ceilingIdx = getRankIndex(ceiling);
   const nextRank = RANKS[rankIdx + 1];
+  const nextRankIdx = rankIdx + 1;
   const eligible = getEligibleRank(state.stage, power, ceiling);
   const eligibleIdx = getRankIndex(eligible.id);
 
   const canStart = eligibleIdx > rankIdx && !!nextRank;
   const ceilingReached = nextRank && rankIdx >= ceilingIdx;
 
-  // Boss HP scales to the next rank's powerRequired so the fight feels like a wall.
+  // Boss + player stats
   const bossMaxHp = nextRank ? Math.max(500, nextRank.powerRequired * 4) : 0;
-  const [bossHp, setBossHp] = useState(bossMaxHp);
+  const gatekeeperAttack = nextRank ? getRankUpGatekeeperAttack(nextRankIdx) : 0;
+  const playerMaxHp = getPlayerMaxHp(state, buffs.equipHpBonus);
+  const playerDefense = buffs.equipDefense;
+
+  // Local fight state — bossHp lives here (hook doesn't track enemy HP).
   const [running, setRunning] = useState(false);
-  const [startedAt, setStartedAt] = useState(0);
-  const [, forceTick] = useState(0);
-  const [outcome, setOutcome] = useState(null); // null | 'win' | 'timeout'
+  const [bossHp, setBossHp] = useState(bossMaxHp);
   const [floatingTexts, setFloatingTexts] = useState([]);
 
+  // Refs for live reads inside hook callbacks.
   const bossHpRef = useRef(bossMaxHp);
   bossHpRef.current = bossHp;
   const stateRef = useRef(state);
   stateRef.current = state;
   const totalDmgRef = useRef(totalDamage);
   totalDmgRef.current = totalDamage;
+  const playerDefenseRef = useRef(playerDefense);
+  playerDefenseRef.current = playerDefense;
+  const stageRef = useRef(state.stage);
+  stageRef.current = state.stage;
 
-  // Damage tick: shared with BattleScreen. Crit + active skill mult handled inside.
-  // We only apply damage; the timeout check lives in the effect below.
-  useCombatLoop({
+  // The fight. Hook owns: player HP, timer, outcome, defeat-fire.
+  // We own: boss HP, victory detection (signaled via combat.endRun).
+  // `combat` is referenced inside onAttack — that's safe because the arrow
+  // only accesses `combat` when called (next tick), by which time it's been
+  // assigned. Capturing a not-yet-assigned const in a closure is legal in JS.
+  const combat = useCombatLoop({
     enabled: running,
     getBaseDamage: () => totalDmgRef.current,
     getBuffs: () => getAllBuffs(stateRef.current),
@@ -64,65 +84,65 @@ export default function RankUpScreen({ state, update, onClose }) {
       const newHp = bossHpRef.current - damage;
       if (newHp <= 0) {
         setBossHp(0);
-        setRunning(false);
-        setOutcome("win");
+        combat.endRun("victory");
         return;
       }
       setBossHp(newHp);
     },
+
+    // Mode B fields — this is what makes the Gatekeeper hit back.
+    playerMaxHp,
+    getPlayerDefense: () => playerDefenseRef.current,
+    getEnemyAttack: () => gatekeeperAttack,
+    getEnemyStage: () => stageRef.current,
+    timeLimitSec: TIME_LIMIT_SEC,
+    onDefeat: () => {
+      // Death or timeout both flow through onDefeat. The hook has already
+      // set its outcome; we just need to release `running` so the UI shows
+      // the failure card instead of the arena.
+      setRunning(false);
+    },
   });
 
-  // Timeout watcher: separate from damage loop because timeouts can fire even
-  // if no damage was dealt (e.g. if the player's DPS is 0 somehow), and we
-  // want a precise expiry rather than "checked on the next tick."
-  useEffect(() => {
-    if (!running) return;
-    const expiresIn = TIME_LIMIT_SEC * 1000 - (Date.now() - startedAt);
-    if (expiresIn <= 0) {
-      setRunning(false);
-      setOutcome("timeout");
-      return;
-    }
-    const t = setTimeout(() => {
-      setRunning(false);
-      setOutcome("timeout");
-    }, expiresIn);
-    return () => clearTimeout(t);
-  }, [running, startedAt]);
+  const outcome = combat?.outcome ?? null;
+  const playerHp = combat?.playerHp ?? playerMaxHp;
+  const remaining = combat?.remainingSec ?? TIME_LIMIT_SEC;
 
-  // 250ms cosmetic re-render so the "Xs left" countdown updates smoothly even
-  // when no other state is changing.
+  // When the player wins, the hook sets outcome='victory' via endRun() but
+  // doesn't flip our local `running` flag. Do that here so the arena card
+  // swaps to the trial-cleared card on the next render.
   useEffect(() => {
-    if (!running) return;
-    const i = setInterval(() => forceTick((n) => n + 1), 250);
-    return () => clearInterval(i);
-  }, [running]);
+    if (running && outcome === "victory") {
+      setRunning(false);
+    }
+  }, [running, outcome]);
 
   function start() {
     if (!canStart) return;
-    if (state.stamina < 30) return;
+    if (state.stamina < STAMINA_COST) return;
     setBossHp(bossMaxHp);
-    setOutcome(null);
-    setStartedAt(Date.now());
     setRunning(true);
-    update((s) => ({ ...s, stamina: s.stamina - 30 }));
+    update((s) => ({ ...s, stamina: s.stamina - STAMINA_COST }));
   }
 
   function claimRankUp() {
-    if (outcome !== "win") return;
+    if (outcome !== "victory") return;
     update((s) => ({ ...s, rank: eligible.id }));
-    setOutcome(null);
     onClose?.();
   }
 
   function retry() {
-    setOutcome(null);
+    if (state.stamina < STAMINA_COST) return;
     setBossHp(bossMaxHp);
+    setRunning(true);
+    update((s) => ({ ...s, stamina: s.stamina - STAMINA_COST }));
   }
 
-  const elapsed = running ? (Date.now() - startedAt) / 1000 : 0;
-  const remaining = Math.max(0, TIME_LIMIT_SEC - elapsed);
   const bossHpPct = (bossHp / Math.max(1, bossMaxHp)) * 100;
+  const playerHpPct = (playerHp / Math.max(1, playerMaxHp)) * 100;
+  const lowHp = playerHpPct <= 25;
+
+  // ---- Early-exit panels ----
 
   if (ceilingReached) {
     return (
@@ -156,6 +176,8 @@ export default function RankUpScreen({ state, update, onClose }) {
     );
   }
 
+  // ---- Main fight panel ----
+
   return (
     <div className="page-panel">
       <h2>Rank-Up Dungeon</h2>
@@ -165,7 +187,7 @@ export default function RankUpScreen({ state, update, onClose }) {
           Ascend to <strong style={{ color: nextRank.color }}>{nextRank.name}</strong>
         </p>
         <p className="dim small">
-          Defeat the gatekeeper within {TIME_LIMIT_SEC}s. Costs 30 ⚡ per attempt.
+          Defeat the Gatekeeper within {TIME_LIMIT_SEC}s. Costs {STAMINA_COST} ⚡ per attempt.
         </p>
         {!canStart && (
           <p className="dim small">
@@ -177,16 +199,18 @@ export default function RankUpScreen({ state, update, onClose }) {
       {!running && outcome === null && (
         <div className="card">
           <p>Boss HP: {bossMaxHp.toLocaleString()}</p>
+          <p>Boss Attack: {gatekeeperAttack}/sec</p>
           <p>Your DPS: {totalDamage.toLocaleString()}/sec</p>
+          <p>Your HP: {playerMaxHp.toLocaleString()} · DEF {playerDefense}</p>
           <p className="dim small">
             Estimated kill time: {Math.ceil(bossMaxHp / Math.max(1, totalDamage))}s
           </p>
           <button
             onClick={start}
-            disabled={!canStart || state.stamina < 30}
-            className={!canStart || state.stamina < 30 ? "disabled-skill" : "boss-btn"}
+            disabled={!canStart || state.stamina < STAMINA_COST}
+            className={!canStart || state.stamina < STAMINA_COST ? "disabled-skill" : "boss-btn"}
           >
-            {state.stamina < 30 ? "Not enough stamina" : "Begin Trial (30 ⚡)"}
+            {state.stamina < STAMINA_COST ? "Not enough stamina" : `Begin Trial (${STAMINA_COST} ⚡)`}
           </button>
           <button onClick={onClose} className="flee-btn" style={{ marginTop: 8 }}>Cancel</button>
         </div>
@@ -195,7 +219,7 @@ export default function RankUpScreen({ state, update, onClose }) {
       {running && (
         <div className="card rankup-arena">
           <div className="rankup-timer">⏱ {Math.ceil(remaining)}s</div>
-          <div className="rankup-boss-sprite">👹</div>
+          <div className={`rankup-boss-sprite ${lowHp ? "danger-pulse" : ""}`}>👹</div>
 
           <div className="floating-text-container">
             {floatingTexts.map((t) => (
@@ -221,11 +245,22 @@ export default function RankUpScreen({ state, update, onClose }) {
                 style={{ width: `${Math.max(0, bossHpPct)}%` }}
               />
             </div>
+
+            <div className="hp-label" style={{ marginTop: 10 }}>
+              <span>{lowHp ? "⚠ Your HP" : "Your HP"}</span>
+              <span>{Math.max(0, Math.ceil(playerHp)).toLocaleString()} / {playerMaxHp.toLocaleString()}</span>
+            </div>
+            <div className="hp-bar">
+              <div
+                className={`hp-fill player-hp ${lowHp ? "danger" : ""}`}
+                style={{ width: `${Math.max(0, playerHpPct)}%` }}
+              />
+            </div>
           </div>
         </div>
       )}
 
-      {outcome === "win" && (
+      {outcome === "victory" && (
         <div className="card reward-card">
           <h3>Trial Cleared!</h3>
           <p>You have ascended to <strong style={{ color: nextRank.color }}>{nextRank.name}</strong>.</p>
@@ -238,7 +273,33 @@ export default function RankUpScreen({ state, update, onClose }) {
           <h3>Time's Up</h3>
           <p>The Gatekeeper repelled you. Grow stronger and return.</p>
           <div className="skill-row">
-            <button onClick={retry} className="boss-btn">Try Again (30 ⚡)</button>
+            <button
+              onClick={retry}
+              disabled={state.stamina < STAMINA_COST}
+              className={state.stamina < STAMINA_COST ? "disabled-skill" : "boss-btn"}
+            >
+              {state.stamina < STAMINA_COST ? "Not enough stamina" : `Try Again (${STAMINA_COST} ⚡)`}
+            </button>
+            <button onClick={onClose} className="flee-btn">Back</button>
+          </div>
+        </div>
+      )}
+
+      {outcome === "death" && (
+        <div className="card">
+          <h3 style={{ color: "#ff174f" }}>💀 Defeated</h3>
+          <p>The Gatekeeper struck you down. Upgrade your armor and vitality before another attempt.</p>
+          <p className="dim small">
+            Tip: armor grants both HP and Defense. Defense reduces incoming hits via diminishing returns.
+          </p>
+          <div className="skill-row">
+            <button
+              onClick={retry}
+              disabled={state.stamina < STAMINA_COST}
+              className={state.stamina < STAMINA_COST ? "disabled-skill" : "boss-btn"}
+            >
+              {state.stamina < STAMINA_COST ? "Not enough stamina" : `Try Again (${STAMINA_COST} ⚡)`}
+            </button>
             <button onClick={onClose} className="flee-btn">Back</button>
           </div>
         </div>

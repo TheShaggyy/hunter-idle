@@ -83,6 +83,19 @@ button:disabled {
   font-weight: 800;
 }
 
+/* Player vitals line under the profile (HP + Defense). Mildly tinted so
+   at-a-glance you can read "am I beefy enough for the next gate." */
+.hud-vitals {
+  margin-top: 4px !important;
+  letter-spacing: 0.02em;
+}
+.hud-hp {
+  color: #4ade80;
+}
+.hud-def {
+  color: rgba(255, 255, 255, 0.55);
+}
+
 .resource-row {
   margin-top: 9px;
   display: grid;
@@ -985,6 +998,34 @@ button:disabled {
 @keyframes bossHpShimmer {
   from { background-position-x: 0; }
   to { background-position-x: 200%; }
+}
+
+/* Player HP bar — green by default, switches to red flash when critical */
+.hp-fill.player-hp {
+  background: linear-gradient(90deg, #22c55e, #4ade80);
+  box-shadow: 0 0 12px rgba(34, 197, 94, 0.5);
+}
+
+.hp-fill.player-hp.danger {
+  background: linear-gradient(90deg, #ff174f, #ff5a00);
+  box-shadow: 0 0 14px rgba(255, 23, 79, 0.7);
+  animation: dangerPulse 0.6s ease-in-out infinite;
+}
+
+@keyframes dangerPulse {
+  0%, 100% { filter: brightness(1.0); }
+  50% { filter: brightness(1.4); }
+}
+
+/* Boss sprite pulses red when player HP is critical, signalling lethal range */
+.danger-pulse {
+  animation: bossDangerPulse 0.5s ease-in-out infinite;
+  filter: drop-shadow(0 0 12px rgba(255, 23, 79, 0.8));
+}
+
+@keyframes bossDangerPulse {
+  0%, 100% { transform: scale(1.0); }
+  50% { transform: scale(1.08); }
 }
 
 /* Boss / Lord / Flee buttons */
@@ -1908,7 +1949,6 @@ button:disabled {
 }
 
 /* ---------- Skills screen ---------- */
-
 
 .skill-tile-head {
   display: flex;

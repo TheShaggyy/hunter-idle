@@ -10,6 +10,7 @@ import { getTotalDamage, getDamageUpgradeCost } from "../systems/combat.js";
 import { getTeamDamage } from "../systems/combat.js";
 import { getAllBuffs } from "../systems/equipment.js";
 import { useCombatLoop } from "../hooks/useCombatLoop.js";
+import { getVitalityUpgradeCost } from "../systems/health.js";
 import {
   SKILLS,
   getSkillLevel,
@@ -54,6 +55,7 @@ export default function BattleScreen({ state, update }) {
   const teamDamage = getTeamDamage(state.hunters);
   const passiveGpm = Math.floor(getPassiveGoldPerMin(state.stage, totalDamage) * buffs.goldMult);
   const damageCost = getDamageUpgradeCost(state.damageLevel);
+  const vitalityCost = getVitalityUpgradeCost(state.vitalityLevel || 0);
 
   const [floatingTexts, setFloatingTexts] = useState([]);
   const [hunterAttacking, setHunterAttacking] = useState(false);
@@ -188,6 +190,23 @@ export default function BattleScreen({ state, update }) {
         ...s,
         gold: s.gold - damageCost,
         damageLevel: s.damageLevel + 1,
+        quests: { counters: inc.counters, list: inc.quests },
+      };
+    });
+  }
+
+  // Vitality: gold-sink, +25 max HP per level. Goes through the same goldSpent
+  // quest counter as damage upgrades so both feed the "spend gold" daily.
+  function upgradeVitality() {
+    if (state.gold < vitalityCost) return;
+    update((s) => {
+      const counters = s.quests?.counters || {};
+      const questList = s.quests?.list || [];
+      const inc = incrementCounter(counters, questList, "goldSpent", vitalityCost);
+      return {
+        ...s,
+        gold: s.gold - vitalityCost,
+        vitalityLevel: (s.vitalityLevel || 0) + 1,
         quests: { counters: inc.counters, list: inc.quests },
       };
     });
@@ -475,6 +494,17 @@ export default function BattleScreen({ state, update }) {
             <strong>{damageCost} 🪙</strong>
           </button>
 
+          <button
+            onClick={upgradeVitality}
+            disabled={state.gold < vitalityCost}
+            className={state.gold < vitalityCost ? "disabled-skill" : ""}
+          >
+            <span>Upgrade VIT</span>
+            <strong>{vitalityCost} 🪙</strong>
+          </button>
+        </div>
+
+        <div className="skill-row">
           {state.onBossFight ? (
             <button onClick={fleeBossFight} className="flee-btn">
               <span>Flee Boss</span>

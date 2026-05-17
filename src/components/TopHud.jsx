@@ -1,7 +1,7 @@
 import { getRankById } from "../data/ranks.js";
 import { getAwakeningTitle } from "../data/awakening.js";
 
-export default function TopHud({ state, associationPower }) {
+export default function TopHud({ state, associationPower, playerMaxHp, playerDefense }) {
   const rank = getRankById(state.rank);
   const awakeningTitle = getAwakeningTitle(state.awakeningLevel || 0);
 
@@ -21,6 +21,13 @@ export default function TopHud({ state, associationPower }) {
             <span className="dim"> · Power {formatNum(associationPower)}</span>
           </p>
           <p className="dim small">{awakeningTitle}</p>
+          {/* Player vitals — only shown if computed (App always passes them post-Step 5). */}
+          {(playerMaxHp != null) && (
+            <p className="hud-vitals small">
+              <span className="hud-hp">❤️ {formatNum(playerMaxHp)}</span>
+              <span className="hud-def"> · 🛡️ {playerDefense ?? 0}</span>
+            </p>
+          )}
         </div>
       </div>
 

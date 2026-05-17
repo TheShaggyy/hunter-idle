@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { SAVE_KEY, getInitialState, migrate, getNextDailyResetTs } from "./initialState.js";
 import { tickStamina, getMaxStamina } from "../systems/stamina.js";
 import { getRankIndex } from "../data/ranks.js";
@@ -18,9 +18,14 @@ import { getRankCeiling } from "../data/awakening.js";
 // - awakening reset application
 
 export function useGameState() {
-  const [state, setState] = useState(getInitialState);
+  // _loaded is part of state on purpose. A ref guard was unreliable under
+  // React StrictMode dev: the autosave effect could fire on the initial
+  // default state before the load effect ran, clobbering the real save
+  // (stage/gold/damage/etc. resetting to defaults on reload — see git log).
+  // Putting the marker in state means the autosave snapshot itself knows
+  // whether it's safe to persist. The flag is stripped before writing.
+  const [state, setState] = useState(() => ({ ...getInitialState(), _loaded: false }));
   const [offlineReward, setOfflineReward] = useState(null);
-  const hasLoaded = useRef(false);
 
   useEffect(() => {
     const raw = localStorage.getItem(SAVE_KEY);
@@ -96,6 +101,7 @@ export function useGameState() {
           enemyHp: migrated.enemyHp > 0 ? migrated.enemyHp : enemyMaxHp,
           enemyMaxHp,
           ...dailyFields,
+          _loaded: true,
         });
 
         if (earnedOfflineGold > 0) {
@@ -109,7 +115,7 @@ export function useGameState() {
           counters: fresh.quests.counters,
           list: rollDailyQuests(fresh.dailyResetAt, 0),
         };
-        setState(fresh);
+        setState({ ...fresh, _loaded: true });
       }
     } else {
       setState((s) => {
@@ -122,16 +128,24 @@ export function useGameState() {
             counters: s.quests.counters,
             list: rollDailyQuests(s.dailyResetAt, 0),
           },
+          _loaded: true,
         };
       });
     }
 
-    hasLoaded.current = true;
+    // hasLoaded ref pattern removed; _loaded is now part of state.
   }, []);
 
   useEffect(() => {
-    if (!hasLoaded.current) return;
-    const toSave = { ...state, lastPlayed: Date.now() };
+    // Don't persist until the load effect has explicitly marked state as
+    // loaded. Using a state flag (not a ref) is critical: React StrictMode
+    // in dev double-mounts effects, and a fresh useRef(false) on remount
+    // can let a default-state autosave fire before load completes,
+    // overwriting the real save. The state flag is part of the snapshot
+    // itself, so this never races.
+    if (!state._loaded) return;
+    const { _loaded, ...persisted } = state;
+    const toSave = { ...persisted, lastPlayed: Date.now() };
     try {
       localStorage.setItem(SAVE_KEY, JSON.stringify(toSave));
     } catch (e) {
@@ -156,7 +170,7 @@ export function useGameState() {
       counters: fresh.quests.counters,
       list: rollDailyQuests(fresh.dailyResetAt, 0),
     };
-    setState({ ...fresh, enemyHp: max, enemyMaxHp: max });
+    setState({ ...fresh, enemyHp: max, enemyMaxHp: max, _loaded: true });
   }, []);
 
   return { state, update, offlineReward, dismissOfflineReward, resetSave };
