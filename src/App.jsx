@@ -11,6 +11,7 @@ import HuntersScreen from "./screens/HuntersScreen.jsx";
 import EquipScreen from "./screens/EquipScreen.jsx";
 import GuildScreen from "./screens/GuildScreen.jsx";
 import ShopScreen from "./screens/ShopScreen.jsx";
+import CombatPortal from "./components/CombatPortal.jsx";
 import { getRankById, getRankIndex } from "./data/ranks.js";
 
 function App() {
@@ -72,6 +73,11 @@ function App() {
       )}
 
       <BottomNav activeTab={activeTab} setActiveTab={setActiveTab} />
+
+      {/* CombatPortal renders only when state.activeCombat is set.
+          It's rendered last so it overlays the rest of the UI; CSS uses
+          z-index to fully obscure HUD/nav/screens during a fight. */}
+      <CombatPortal state={state} update={update} />
     </div>
   );
 }

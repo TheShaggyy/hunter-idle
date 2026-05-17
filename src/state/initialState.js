@@ -5,7 +5,7 @@ import { getInitialPermanentUpgrades } from "../data/awakening.js";
 import { getInitialSkills } from "../data/skills.js";
 import { getInitialQuestState } from "../data/quests.js";
 
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 5;
 export const SAVE_KEY = "hunterIdleSave";
 
 export function getInitialState() {
@@ -66,6 +66,11 @@ export function getInitialState() {
     // attempts cost 25 stamina. Tracks the timestamp of the last FREE attempt
     // consumed. 0 = no free attempts used yet → next attempt is free.
     lastFreeLordAttemptAt: 0,
+
+    // Active full-screen combat. When non-null, App renders the CombatPortal
+    // overlay and locks the player out of the rest of the UI. See
+    // systems/activeCombat.js for the shape and lifecycle.
+    activeCombat: null,
 
     // Equipment
     inventory: [], // [{ instanceId, templateId, name, slot, tier, level, emoji }]
@@ -154,9 +159,24 @@ export function migrate(oldSave) {
     };
   }
 
+  // v4 → v5: introduce full-screen Combat Portal. Saves carry a new
+  // activeCombat field (null = nothing happening). If a save was written
+  // mid-fight (which shouldn't happen — we clear activeCombat on portal
+  // exit — but just in case), we drop it on load so the player doesn't
+  // resurrect into an old fight after a refresh.
+  if (save.version === 4) {
+    save = {
+      ...save,
+      version: 5,
+      activeCombat: null,
+    };
+  }
+
   if (save.version === SAVE_VERSION) {
-    // Same version — merge with defaults to backfill any new fields added since save was written
-    return { ...getInitialState(), ...save };
+    // Same version — merge with defaults to backfill any new fields added since save was written.
+    // Always clear activeCombat on load: a save written mid-fight would
+    // otherwise restore a "ghost" portal on reload with stale enemy values.
+    return { ...getInitialState(), ...save, activeCombat: null };
   }
 
   // Unknown future version — start fresh.

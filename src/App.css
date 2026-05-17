@@ -2163,3 +2163,51 @@ button:disabled {
   font-size: 14px;
   letter-spacing: 0.5px;
 }
+
+/* ===== Combat Portal (Step 6) =====
+   Full-screen overlay that takes over the viewport during boss/Lord/gate
+   fights. Mounts above HUD, screens, and bottom nav. The --portal-color
+   custom property is set inline from JS based on what's being fought
+   (castle accent for stage bosses, red for Lords, gate color for gates).
+   Step 6a: basic full-screen overlay only. 6b adds warp animations. */
+.combat-portal {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background:
+    radial-gradient(
+      ellipse at center,
+      color-mix(in srgb, var(--portal-color, #ff174f) 25%, transparent) 0%,
+      rgba(8, 4, 14, 0.92) 55%,
+      rgba(0, 0, 0, 0.96) 100%
+    ),
+    #060309;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  /* Prevent the body from scrolling beneath the portal */
+  overscroll-behavior: contain;
+  touch-action: manipulation;
+}
+
+.combat-portal-stub {
+  text-align: center;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  padding: 24px 32px;
+  max-width: 90vw;
+  font-weight: 800;
+}
+
+.combat-portal-stub h2 {
+  color: var(--portal-color, #ff174f);
+  margin: 0 0 14px;
+}
+
+.combat-portal-stub p {
+  margin: 6px 0;
+  color: rgba(255, 255, 255, 0.85);
+}

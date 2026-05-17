@@ -11,6 +11,7 @@ import { getTeamDamage } from "../systems/combat.js";
 import { getAllBuffs } from "../systems/equipment.js";
 import { useCombatLoop } from "../hooks/useCombatLoop.js";
 import { getVitalityUpgradeCost } from "../systems/health.js";
+import { startStageBossFight, startCastleLordFight } from "../systems/activeCombat.js";
 import {
   SKILLS,
   getSkillLevel,
@@ -519,6 +520,24 @@ export default function BattleScreen({ state, update }) {
               <strong>Advance stage</strong>
             </button>
           )}
+        </div>
+
+        {/* TEMP STEP 6a DEBUG: opens the portal stub so we can verify it
+            mounts/dismounts cleanly before wiring real fight logic in 6d.
+            Remove this block when 6d lands. */}
+        <div className="skill-row">
+          <button
+            onClick={() => update((s) => ({ ...s, ...startStageBossFight(s) }))}
+            style={{ background: "rgba(255,255,255,0.06)", border: "1px dashed rgba(255,255,255,0.25)" }}
+          >
+            <span>🌀 DEBUG: Open Stage Boss Portal</span>
+          </button>
+          <button
+            onClick={() => update((s) => ({ ...s, ...startCastleLordFight(s) }))}
+            style={{ background: "rgba(255,255,255,0.06)", border: "1px dashed rgba(255,255,255,0.25)" }}
+          >
+            <span>🌀 DEBUG: Open Lord Portal</span>
+          </button>
         </div>
       </section>
     </>
